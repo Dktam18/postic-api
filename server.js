@@ -2,11 +2,13 @@ const express = require('express');
 const { chromium } = require('playwright');
 const axios = require('axios');
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// Use Render's PORT or default to 10000
+const PORT = process.env.PORT || 10000;
 
 app.use(express.json());
 
-// Cookie Sanitizer
+// --- COOKIE SANITIZER ---
 const rawCookies = process.env.X_COOKIE_JSON;
 let cleanCookies = [];
 if (rawCookies) {
@@ -23,24 +25,40 @@ if (rawCookies) {
     } catch (e) { console.error("Cookie Parse Error:", e.message); }
 }
 
-// Main Fetch Endpoint
+// --- MAIN FETCH ENDPOINT ---
 app.get('/fetch', async (req, res) => {
     const tweetUrl = req.query.url;
     if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
 
-    const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ 
-        storageState: { cookies: cleanCookies },
-        viewport: { width: 1280, height: 800 }
+    // LAUNCH ARGS: Crucial for running Playwright on Render without 502 errors
+    const browser = await chromium.launch({ 
+        headless: true,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage', 
+            '--disable-gpu'
+        ]
     });
+
+    const context = await browser.newContext({ 
+        storageState: cleanCookies.length > 0 ? { cookies: cleanCookies } : undefined,
+        viewport: { width: 1280, height: 800 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    });
+
     const page = await context.newPage();
 
-    // Data Saver: Don't download images, just get the links
+    // Data Saver: Abort images to save bandwidth
     await page.route('**/*.{png,jpg,jpeg,svg}', route => route.abort());
 
     try {
+        console.log(`📡 Fetching: ${tweetUrl}`);
         await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(5000); 
+        
+        // Wait for the tweet to actually render the numbers
+        await page.waitForSelector('article', { timeout: 15000 });
+        await page.waitForTimeout(4000); 
 
         const result = await page.evaluate(() => {
             const tweets = Array.from(document.querySelectorAll('article'));
@@ -60,6 +78,7 @@ app.get('/fetch', async (req, res) => {
 
         res.json({ success: true, data: result });
     } catch (err) {
+        console.error("Scrape Error:", err.message);
         res.status(500).json({ success: false, error: err.message });
     } finally {
         await browser.close();
@@ -68,11 +87,15 @@ app.get('/fetch', async (req, res) => {
 
 app.get('/health', (req, res) => res.send("Alive"));
 
-app.listen(PORT, () => {
-    console.log(`Server on ${PORT}`);
-    // Self-ping every 10 mins
+// --- BIND TO 0.0.0.0: Crucial for Render visibility ---
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Postic API strictly running on port ${PORT}`);
+    
+    // Self-ping to stay awake
     setInterval(() => {
-        const url = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/health`;
-        if (process.env.RENDER_EXTERNAL_HOSTNAME) axios.get(url).catch(() => {});
+        if (process.env.RENDER_EXTERNAL_HOSTNAME) {
+            const url = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/health`;
+            axios.get(url).catch(() => {});
+        }
     }, 600000);
 });
