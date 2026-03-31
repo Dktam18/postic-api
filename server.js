@@ -30,14 +30,17 @@ app.get('/fetch', async (req, res) => {
     const tweetUrl = req.query.url;
     if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
 
-    // LAUNCH ARGS: Crucial for running Playwright on Render without 502 errors
+    // CRITICAL: Launch arguments for Linux environments (Render)
     const browser = await chromium.launch({ 
         headless: true,
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
             '--disable-dev-shm-usage', 
-            '--disable-gpu'
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process' // Helps with low-memory environments like Free Tier
         ]
     });
 
@@ -49,16 +52,16 @@ app.get('/fetch', async (req, res) => {
 
     const page = await context.newPage();
 
-    // Data Saver: Abort images to save bandwidth
+    // Data Saver: Abort images to save bandwidth & speed up load
     await page.route('**/*.{png,jpg,jpeg,svg}', route => route.abort());
 
     try {
         console.log(`📡 Fetching: ${tweetUrl}`);
-        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        // Increased timeout to 90s because Free Tier is slow
+        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
         
-        // Wait for the tweet to actually render the numbers
-        await page.waitForSelector('article', { timeout: 15000 });
-        await page.waitForTimeout(4000); 
+        await page.waitForSelector('article', { timeout: 30000 });
+        await page.waitForTimeout(3000); 
 
         const result = await page.evaluate(() => {
             const tweets = Array.from(document.querySelectorAll('article'));
@@ -87,15 +90,19 @@ app.get('/fetch', async (req, res) => {
 
 app.get('/health', (req, res) => res.send("Alive"));
 
-// --- BIND TO 0.0.0.0: Crucial for Render visibility ---
-app.listen(PORT, '0.0.0.0', () => {
+// --- BINDING TO 0.0.0.0 ---
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Postic API strictly running on port ${PORT}`);
-    
-    // Self-ping to stay awake
-    setInterval(() => {
-        if (process.env.RENDER_EXTERNAL_HOSTNAME) {
-            const url = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/health`;
-            axios.get(url).catch(() => {});
-        }
-    }, 600000);
 });
+
+// Increase timeouts to prevent "Connection Reset" 502s
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;
+
+// Self-ping to stay awake
+setInterval(() => {
+    if (process.env.RENDER_EXTERNAL_HOSTNAME) {
+        const url = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/health`;
+        axios.get(url).catch(() => {});
+    }
+}, 600000);
