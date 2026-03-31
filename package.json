@@ -1,9 +1,8 @@
 {
   "name": "postic-api-vercel",
   "version": "1.0.0",
-  "main": "api/fetch.js",
   "dependencies": {
-    "@sparticuz/chromium": "122.0.0",
-    "playwright-core": "1.42.0"
+    "@sparticuz/chromium": "131.0.1",
+    "playwright-core": "1.49.1"
   }
 }
