@@ -1,11 +1,10 @@
 {
   "name": "postic-api",
   "version": "1.0.0",
-  "description": "Smart Import API for Postic",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "npm install && npx playwright install chromium --with-deps"
+    "build": "npm install && npx playwright install chromium"
   },
   "dependencies": {
     "axios": "^1.6.0",
