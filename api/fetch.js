@@ -3,7 +3,7 @@ const chromiumPack = require('@sparticuz/chromium-min');
 
 export default async function handler(req, res) {
     const tweetUrl = req.query.url;
-    if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
+    if (!tweetUrl) return res.status(400).json({ error: "No URL provided" });
 
     // --- COOKIE LOGIC ---
     const rawCookies = process.env.X_COOKIE_JSON;
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 🚀 THE FIX FOR NODE 24: Use a remote executable pack
+        // 🚀 THE FIX: Point to the remote executable pack (contains libnspr4, libnss3, etc.)
         const executablePath = await chromiumPack.executablePath(
             'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
         );
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
 
         const page = await context.newPage();
         
-        // Speed boost: stop heavy assets
+        // Speed boost: block images/css
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', route => route.abort());
 
         await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
