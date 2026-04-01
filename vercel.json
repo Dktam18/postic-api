@@ -1,8 +1,8 @@
 {
   "functions": {
-    "api/fetch.js": {
-      "maxDuration": 60,
-      "memory": 1024
+    "api/*.js": {
+      "maxDuration": 30,
+      "memory": 3008
     }
   }
 }
