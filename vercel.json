@@ -1,14 +1,14 @@
 {
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/fetch/:id",
+      "destination": "/api/fetch?url=https://x.com/i/status/:id"
+    }
+  ],
   "functions": {
     "api/*.js": {
-      "maxDuration": 30,
-      "memory": 1024
+      "maxDuration": 10
     }
-  },
-  "builds": [
-    {
-      "src": "api/*.js",
-      "use": "@vercel/node"
-    }
-  ]
+  }
 }
