@@ -1,8 +1,12 @@
 {
-  "name": "twitter-scraper",
+  "name": "postic-api",
   "version": "1.0.0",
+  "description": "Postic HD Frame Fetcher",
+  "main": "api/fetch.js",
   "dependencies": {
-    "@sparticuz/chromium": "^121.0.0",
-    "puppeteer-core": "^21.0.0"
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
