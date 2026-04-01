@@ -8,13 +8,12 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 🚀 THE FIX: Tell it exactly where to get the 'missing' binaries from.
-        // This link contains libnspr4.so and all the required Linux files.
+        // 1. Extract the browser to the /tmp folder
         const executablePath = await chromiumPack.executablePath(
             'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
         );
 
-        // Tell the OS to look in the /tmp folder for the shared libraries it needs
+        // 🚀 THE MAGIC LINE: Tells Linux where to find libnspr4.so
         const execDir = path.dirname(executablePath);
         process.env.LD_LIBRARY_PATH = `${execDir}:${process.env.LD_LIBRARY_PATH || ''}`;
 
@@ -27,11 +26,11 @@ export default async function handler(req, res) {
         const context = await browser.newContext();
         const page = await context.newPage();
         
-        // Speed boost: stop heavy visual junk
+        // Speed boost: block images/css
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', r => r.abort());
 
-        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForSelector('article', { timeout: 10000 });
+        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.waitForSelector('article', { timeout: 15000 });
 
         const data = await page.evaluate(() => {
             const t = document.querySelector('article');
@@ -48,7 +47,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, data });
 
     } catch (err) {
-        return res.status(500).json({ success: false, error: "Launch Error: " + err.message });
+        return res.status(500).json({ success: false, error: "Postic Error: " + err.message });
     } finally {
         if (browser) await browser.close();
     }
