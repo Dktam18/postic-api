@@ -8,22 +8,15 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 1. Get the path to the extracted chromium
-        const executablePath = await chromiumPack.executablePath();
-        
-        // 🚀 THE CRITICAL FIX: Tell the system exactly where the missing .so files are.
-        // We set the LD_LIBRARY_PATH to the same folder as the browser binary.
+        // 1. Force Node to find the missing libraries (.so files)
+        const executablePath = await chromiumPack.executablePath(
+            'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
+        );
         const execDir = path.dirname(executablePath);
         process.env.LD_LIBRARY_PATH = `${execDir}:${process.env.LD_LIBRARY_PATH || ''}`;
 
         browser = await chromium.launch({
-            args: [
-                ...chromiumPack.args, 
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-gpu',
-                '--single-process'
-            ],
+            args: [...chromiumPack.args, '--no-sandbox', '--disable-setuid-sandbox'],
             executablePath: executablePath,
             headless: true,
         });
