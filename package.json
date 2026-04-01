@@ -1,8 +1,7 @@
 {
-  "name": "postic-api-vercel",
+  "name": "postic-api",
   "version": "1.0.0",
   "dependencies": {
-    "@sparticuz/chromium-min": "131.0.1",
-    "playwright-core": "1.49.1"
+    "playwright-core": "^1.49.1"
   }
 }
