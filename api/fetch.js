@@ -3,9 +3,8 @@ const chromiumPack = require('@sparticuz/chromium-min');
 
 export default async function handler(req, res) {
     const tweetUrl = req.query.url;
-    if (!tweetUrl) return res.status(400).json({ error: "No URL provided" });
+    if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
 
-    // --- COOKIE LOGIC ---
     const rawCookies = process.env.X_COOKIE_JSON;
     let cleanCookies = [];
     if (rawCookies) {
@@ -21,7 +20,7 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 🚀 THE FIX: Point to the remote executable pack (contains libnspr4, libnss3, etc.)
+        // 🚀 THE FIX: This specific link includes libnspr4.so and all other missing files
         const executablePath = await chromiumPack.executablePath(
             'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
         );
@@ -39,7 +38,7 @@ export default async function handler(req, res) {
 
         const page = await context.newPage();
         
-        // Speed boost: block images/css
+        // Block heavy junk to save RAM
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', route => route.abort());
 
         await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -49,9 +48,11 @@ export default async function handler(req, res) {
             const t = document.querySelector('article');
             return {
                 text: t?.querySelector('div[data-testid="tweetText"]')?.innerText,
-                author: t?.querySelector('div[data-testid="User-Name"]')?.innerText.split('\n')[0],
-                handle: t?.querySelector('div[data-testid="User-Name"] span')?.innerText,
-                avatar: t?.querySelector('div[data-testid="Tweet-User-Avatar"] img')?.src,
+                user: {
+                    name: t?.querySelector('div[data-testid="User-Name"]')?.innerText.split('\n')[0],
+                    handle: t?.querySelector('div[data-testid="User-Name"] span')?.innerText,
+                    avatar: t?.querySelector('div[data-testid="Tweet-User-Avatar"] img')?.src
+                },
                 metrics: {
                     likes: document.querySelector('div[data-testid="like"]')?.innerText || "0",
                     views: document.querySelector('a[href*="/analytics"]')?.innerText || "0"
