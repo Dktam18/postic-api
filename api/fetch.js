@@ -8,15 +8,16 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 1. Force Node to find the missing libraries (.so files)
-        const executablePath = await chromiumPack.executablePath(
-            'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
-        );
+        // 1. Prepare Chromium
+        const executablePath = await chromiumPack.executablePath();
         const execDir = path.dirname(executablePath);
+
+        // 2. CRITICAL: Set the library path so Linux can see libnspr4.so
         process.env.LD_LIBRARY_PATH = `${execDir}:${process.env.LD_LIBRARY_PATH || ''}`;
 
+        // 3. Launch with specific 'Serverless' args
         browser = await chromium.launch({
-            args: [...chromiumPack.args, '--no-sandbox', '--disable-setuid-sandbox'],
+            args: [...chromiumPack.args, '--no-sandbox', '--disable-setuid-sandbox', '--single-process'],
             executablePath: executablePath,
             headless: true,
         });
@@ -24,7 +25,7 @@ export default async function handler(req, res) {
         const context = await browser.newContext();
         const page = await context.newPage();
         
-        // Speed boost: ignore visual junk
+        // Speed up: block images/css
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', r => r.abort());
 
         await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
