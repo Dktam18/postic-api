@@ -1,5 +1,6 @@
 const { chromium } = require('playwright-core');
 const chromiumPack = require('@sparticuz/chromium-min');
+const path = require('path');
 
 export default async function handler(req, res) {
     const tweetUrl = req.query.url;
@@ -7,14 +8,22 @@ export default async function handler(req, res) {
 
     let browser;
     try {
-        // 🚀 THE PERMANENT FIX: 
-        // We provide a direct link to the binaries. This skips the "directory not found" issue.
-        const executablePath = await chromiumPack.executablePath(
-            'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
-        );
+        // 1. Get the path to the extracted chromium
+        const executablePath = await chromiumPack.executablePath();
+        
+        // 🚀 THE CRITICAL FIX: Tell the system exactly where the missing .so files are.
+        // We set the LD_LIBRARY_PATH to the same folder as the browser binary.
+        const execDir = path.dirname(executablePath);
+        process.env.LD_LIBRARY_PATH = `${execDir}:${process.env.LD_LIBRARY_PATH || ''}`;
 
         browser = await chromium.launch({
-            args: [...chromiumPack.args, '--no-sandbox', '--disable-setuid-sandbox'],
+            args: [
+                ...chromiumPack.args, 
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--single-process'
+            ],
             executablePath: executablePath,
             headless: true,
         });
@@ -22,7 +31,7 @@ export default async function handler(req, res) {
         const context = await browser.newContext();
         const page = await context.newPage();
         
-        // Speed boost: block images/css to stay under Vercel's 10s limit
+        // Speed boost: ignore visual junk
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', r => r.abort());
 
         await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
