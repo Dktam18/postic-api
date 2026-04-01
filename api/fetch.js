@@ -3,22 +3,18 @@ const chromiumPack = require('@sparticuz/chromium-min');
 
 export default async function handler(req, res) {
     const tweetUrl = req.query.url;
-    if (!tweetUrl) return res.status(400).json({ error: "No URL provided" });
+    if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
 
     let browser;
     try {
-        // We use the local version since we don't want external bills
-        const executablePath = await chromiumPack.executablePath();
+        // 🚀 THE PERMANENT FIX: 
+        // We provide a direct link to the binaries. This skips the "directory not found" issue.
+        const executablePath = await chromiumPack.executablePath(
+            'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
+        );
 
         browser = await chromium.launch({
-            args: [
-                ...chromiumPack.args,
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--single-process',
-                '--disable-dev-shm-usage',
-                '--disable-gpu'
-            ],
+            args: [...chromiumPack.args, '--no-sandbox', '--disable-setuid-sandbox'],
             executablePath: executablePath,
             headless: true,
         });
@@ -26,20 +22,20 @@ export default async function handler(req, res) {
         const context = await browser.newContext();
         const page = await context.newPage();
         
-        // Block heavy assets to save memory and time
+        // Speed boost: block images/css to stay under Vercel's 10s limit
         await page.route('**/*.{png,jpg,jpeg,svg,css,woff,video}', r => r.abort());
 
-        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForSelector('div[data-testid="tweetText"]', { timeout: 10000 });
 
         const data = await page.evaluate(() => {
-            const tweet = document.querySelector('article');
+            const t = document.querySelector('article');
             return {
-                text: tweet?.querySelector('div[data-testid="tweetText"]')?.innerText,
+                text: t?.querySelector('div[data-testid="tweetText"]')?.innerText,
                 user: {
-                    name: tweet?.querySelector('div[data-testid="User-Name"]')?.innerText.split('\n')[0],
-                    handle: tweet?.querySelector('div[data-testid="User-Name"] span')?.innerText,
-                    avatar: tweet?.querySelector('div[data-testid="Tweet-User-Avatar"] img')?.src
+                    name: t?.querySelector('div[data-testid="User-Name"]')?.innerText.split('\n')[0],
+                    handle: t?.querySelector('div[data-testid="User-Name"] span')?.innerText,
+                    avatar: t?.querySelector('div[data-testid="Tweet-User-Avatar"] img')?.src
                 }
             };
         });
@@ -47,7 +43,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, data });
 
     } catch (err) {
-        // This gives us the exact error if it fails again
         return res.status(500).json({ success: false, error: err.message });
     } finally {
         if (browser) await browser.close();
