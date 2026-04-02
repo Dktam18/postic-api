@@ -6,17 +6,22 @@ export default async function handler(req, res) {
     }
 
     const tweetId = tweetUrl.match(/\d+($|(?=\?|\/))/)?.[0];
+
     if (!tweetId) {
         return res.status(400).json({ success: false, error: "Invalid Tweet ID" });
     }
 
     try {
+        // ✅ Load cookies
         const cookies = JSON.parse(process.env.X_COOKIE_JSON || "[]");
         const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
         const ct0 = cookies.find(c => c.name === "ct0")?.value;
 
-        if (!ct0) throw new Error("Missing ct0 token");
+        if (!ct0) {
+            throw new Error("Missing ct0 token in cookies");
+        }
 
+        // 🔥 GraphQL endpoint
         const url = "https://twitter.com/i/api/graphql/QH3PZk8zqQzQWz1yQ8p4ZQ/TweetDetail";
 
         const variables = {
@@ -40,6 +45,7 @@ export default async function handler(req, res) {
                     "x-csrf-token": ct0,
                     "cookie": cookieHeader,
                     "x-twitter-active-user": "yes",
+                    "x-twitter-client-language": "en",
                     "user-agent": "Mozilla/5.0"
                 }
             }
@@ -50,66 +56,68 @@ export default async function handler(req, res) {
         const instructions =
             data?.data?.threaded_conversation_with_injections_v2?.instructions || [];
 
-        let mainTweet = null;
-        let quotedTweet = null;
+        // 🔥 Helper to format tweet
+        const extractTweet = (tweetResult) => {
+            if (!tweetResult?.legacy) return null;
 
+            const legacy = tweetResult.legacy;
+            const user = tweetResult.core?.user_results?.result?.legacy;
+
+            return {
+                id: legacy.id_str,
+                text: legacy.full_text,
+
+                user: {
+                    name: user?.name,
+                    username: user?.screen_name,
+                    avatar: user?.profile_image_url_https?.replace("_normal", "_400x400"),
+                    verified: user?.verified || user?.is_blue_verified
+                },
+
+                stats: {
+                    likes: legacy.favorite_count,
+                    reposts: legacy.retweet_count,
+                    replies: legacy.reply_count,
+                    quotes: legacy.quote_count
+                },
+
+                media: legacy.entities?.media?.map(m => ({
+                    url: m.media_url_https,
+                    type: m.type
+                })) || [],
+
+                quoted: tweetResult?.quoted_status_result?.result
+                    ? extractTweet(tweetResult.quoted_status_result.result)
+                    : null
+            };
+        };
+
+        let mainTweet = null;
+
+        // 🔥 LOOP THROUGH ALL POSSIBLE STRUCTURES
         for (const inst of instructions) {
             if (inst.type !== "TimelineAddEntries") continue;
 
             for (const entry of inst.entries) {
-                const tweetResult =
-                    entry?.content?.itemContent?.tweet_results?.result;
 
-                if (!tweetResult?.legacy) continue;
+                // ✅ Case 1: Direct tweet
+                const direct = entry?.content?.itemContent?.tweet_results?.result;
 
-                const legacy = tweetResult.legacy;
-                const user = tweetResult.core?.user_results?.result?.legacy;
+                if (direct && !mainTweet) {
+                    mainTweet = extractTweet(direct);
+                    continue;
+                }
 
-                const formatted = {
-                    id: legacy.id_str,
-                    text: legacy.full_text,
+                // ✅ Case 2: Timeline module (IMPORTANT FIX)
+                const items = entry?.content?.items;
 
-                    user: {
-                        name: user?.name,
-                        username: user?.screen_name,
-                        avatar: user?.profile_image_url_https?.replace("_normal", "_400x400"),
-                        verified: user?.verified || user?.is_blue_verified
-                    },
+                if (items) {
+                    for (const item of items) {
+                        const tweet = item?.item?.itemContent?.tweet_results?.result;
 
-                    stats: {
-                        likes: legacy.favorite_count,
-                        reposts: legacy.retweet_count,
-                        replies: legacy.reply_count,
-                        quotes: legacy.quote_count
-                    },
-
-                    media: legacy.entities?.media || []
-                };
-
-                // First tweet = main
-                if (!mainTweet) {
-                    mainTweet = formatted;
-
-                    // 🔥 Handle quoted tweet
-                    if (tweetResult.quoted_status_result?.result?.legacy) {
-                        const q = tweetResult.quoted_status_result.result;
-                        const qLegacy = q.legacy;
-                        const qUser = q.core?.user_results?.result?.legacy;
-
-                        quotedTweet = {
-                            id: qLegacy.id_str,
-                            text: qLegacy.full_text,
-                            user: {
-                                name: qUser?.name,
-                                username: qUser?.screen_name,
-                                avatar: qUser?.profile_image_url_https?.replace("_normal", "_400x400"),
-                                verified: qUser?.verified || qUser?.is_blue_verified
-                            },
-                            stats: {
-                                likes: qLegacy.favorite_count,
-                                reposts: qLegacy.retweet_count
-                            }
-                        };
+                        if (tweet && !mainTweet) {
+                            mainTweet = extractTweet(tweet);
+                        }
                     }
                 }
             }
@@ -119,7 +127,7 @@ export default async function handler(req, res) {
             success: true,
             data: {
                 main: mainTweet,
-                quoted: quotedTweet
+                quoted: mainTweet?.quoted || null
             }
         });
 
