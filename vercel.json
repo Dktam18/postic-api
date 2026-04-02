@@ -1,14 +1,8 @@
 {
   "version": 2,
-  "rewrites": [
-    {
-      "source": "/api/fetch/:id",
-      "destination": "/api/fetch?url=https://x.com/i/status/:id"
-    }
-  ],
   "functions": {
     "api/*.js": {
-      "maxDuration": 10
+      "maxDuration": 30
     }
   }
 }
