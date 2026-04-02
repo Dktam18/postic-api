@@ -1,80 +1,87 @@
-import http from "https";
-
-export default function handler(req, res) {
+export default async function handler(req, res) {
     const tweetUrl = req.query.url || req.query.id;
-    if (!tweetUrl) return res.status(400).json({ error: "No URL provided" });
+    if (!tweetUrl) return res.status(400).json({ success: false, error: "No URL provided" });
 
     const tweetId = tweetUrl.match(/\d+($|(?=\?|\/))/)?.[0];
-    if (!tweetId) return res.status(400).json({ error: "Invalid ID" });
+    if (!tweetId) return res.status(400).json({ success: false, error: "Invalid Tweet ID" });
 
-    const apiKey = process.env.SCRAPER_ANT_API_KEY;
-    const targetUrl = encodeURIComponent(`https://x.com/i/status/${tweetId}`);
+    try {
+        // 1. Parse your cookies
+        const cookies = JSON.parse(process.env.X_COOKIE_JSON || "[]");
+        const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
+        const ct0 = cookies.find(c => c.name === "ct0")?.value;
 
-    // 🚀 THE BROWSER FIX: browser=true + wait_for_selector=article
-    // This tells ScrapingAnt: "Actually open Chrome and wait for the tweet to appear"
-    const antUrl = `https://api.scraperant.com/v2/general?url=${targetUrl}&x-api-key=${apiKey}&browser=true&wait_for_selector=article&return_page_source=true`;
+        if (!ct0) throw new Error("Cookies are invalid or expired (missing ct0).");
 
-    const options = {
-        "method": "GET",
-        "hostname": "api.scrapingant.com",
-        "path": antUrl.replace('https://api.scrapingant.com', ''),
-        "headers": { "useQueryString": true }
-    };
+        // 2. The Real X API Configuration
+        const queryId = "QH3PZk8zqQzQWz1yQ8p4ZQ"; // This is the public TweetDetail ID
+        const bearer = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"; // Official Web Bearer
+        
+        const variables = {
+            focalTweetId: tweetId,
+            withCommunity: true,
+            includePromotedContent: false,
+            withVoice: true
+        };
 
-    const externalReq = http.request(options, function (externalRes) {
-        let chunks = [];
-        externalRes.on("data", (chunk) => chunks.push(chunk));
+        const features = {
+            responsive_web_graphql_timeline_navigation_enabled: true,
+            verified_phone_label_enabled: false,
+            creator_subscriptions_tweet_preview_api_enabled: true,
+            responsive_web_graphql_tweet_property_web_tweet_constant_bold_enabled: true
+        };
 
-        externalRes.on("end", () => {
-            try {
-                const html = Buffer.concat(chunks).toString();
-                
-                // Search for the data in the rendered HTML
-                const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
-                
-                if (!stateMatch) {
-                    throw new Error("X is still hiding data. The browser didn't load in time.");
-                }
+        const apiUrl = `https://x.com/i/api/graphql/${queryId}/TweetDetail?variables=${encodeURIComponent(JSON.stringify(variables))}&features=${encodeURIComponent(JSON.stringify(features))}`;
 
-                const state = JSON.parse(stateMatch[1]);
-                const users = state.entities?.users?.entities || {};
-                const tweets = state.entities?.tweets?.entities || {};
-                
-                const userId = Object.keys(users)[0];
-                const u = users[userId];
-                const t = tweets[tweetId];
-
-                const result = {
-                    success: true,
-                    data: {
-                        id: tweetId,
-                        text: t?.full_text || t?.text || "",
-                        user: {
-                            name: u?.name || "User",
-                            username: u?.screen_name || "user",
-                            avatar: u?.profile_image_url_https?.replace('_normal', '_400x400'),
-                            isVerified: !!(u?.verified || u?.is_blue_verified)
-                        },
-                        media: t?.extended_entities?.media?.map(m => ({
-                            url: m.media_url_https,
-                            type: m.type
-                        })) || [],
-                        stats: {
-                            likes: t?.favorite_count || 0,
-                            retweets: t?.retweet_count || 0
-                        }
-                    }
-                };
-
-                res.setHeader('Access-Control-Allow-Origin', '*');
-                return res.status(200).json(result);
-
-            } catch (err) {
-                return res.status(500).json({ success: false, error: "Extraction Failed: " + err.message });
+        // 3. The "Human" Request
+        const response = await fetch(apiUrl, {
+            headers: {
+                "authorization": `Bearer ${bearer}`,
+                "x-csrf-token": ct0,
+                "cookie": cookieHeader,
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "x-twitter-active-user": "yes",
+                "x-twitter-client-language": "en"
             }
         });
-    });
 
-    externalReq.on("error", (e) => res.status(500).json({ error: e.message }));
-    externalReq.end();
+        const json = await response.json();
+        
+        // 4. Surgical Extraction of the Tweet
+        const instructions = json?.data?.threaded_conversation_with_injections_v2?.instructions || [];
+        const mainEntry = instructions.find(i => i.type === "TimelineAddEntries")?.entries?.find(e => e.entryId === `tweet-${tweetId}`);
+        const result = mainEntry?.content?.itemContent?.tweet_results?.result || mainEntry?.content?.items?.[0]?.item?.itemContent?.tweet_results?.result;
+
+        if (!result) throw new Error("Tweet not found in API response. Cookies might be dead.");
+
+        const legacy = result.legacy || result.tweet?.legacy;
+        const core = result.core || result.tweet?.core;
+        const user = core?.user_results?.result?.legacy;
+
+        // 5. Success! The thorough data Postic needs
+        return res.status(200).json({
+            success: true,
+            data: {
+                id: tweetId,
+                text: legacy?.full_text || "",
+                user: {
+                    name: user?.name,
+                    username: user?.screen_name,
+                    avatar: user?.profile_image_url_https?.replace("_normal", "_400x400"),
+                    isVerified: user?.verified || user?.is_blue_verified,
+                    verifiedType: result.core?.user_results?.result?.is_blue_verified ? "Blue" : user?.verified_type
+                },
+                media: legacy?.entities?.media?.map(m => ({ url: m.media_url_https, type: m.type })) || [],
+                stats: {
+                    likes: legacy?.favorite_count || 0,
+                    reposts: legacy?.retweet_count || 0,
+                    replies: legacy?.reply_count || 0,
+                    quotes: legacy?.quote_count || 0
+                }
+            }
+        });
+
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 }
