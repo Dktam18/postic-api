@@ -1,38 +1,54 @@
 export default async function handler(req, res) {
+    // 1. Set CORS headers immediately so your frontend can talk to it
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
     const tweetUrl = req.query.url || req.query.id;
-    if (!tweetUrl) return res.status(400).json({ success: false, error: "No URL provided" });
+    if (!tweetUrl) return res.status(400).json({ error: "No URL provided" });
 
+    // 2. Grab the ID
     const tweetId = tweetUrl.match(/\d+($|(?=\?|\/))/)?.[0];
-    if (!tweetId) return res.status(400).json({ success: false, error: "Invalid ID" });
+    if (!tweetId) return res.status(400).json({ error: "Invalid Tweet ID" });
 
+    // 3. SANITY CHECK: Check for the API Key
     const apiKey = process.env.SCRAPER_ANT_API_KEY;
-    
-    try {
-        const targetUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}`;
-        
-        // 🚀 THE FIX: Use ScraperAnt's API and set a 15-second timeout
-        const antUrl = `https://api.scraperant.com/v2/general?url=${encodeURIComponent(targetUrl)}&x-api-key=${apiKey}&browser=false`;
-
-        const response = await fetch(antUrl, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
+    if (!apiKey) {
+        return res.status(500).json({ 
+            success: false, 
+            error: "SERVER ERROR: SCRAPER_ANT_API_KEY is missing in Vercel settings." 
         });
+    }
 
+    try {
+        const targetUrl = encodeURIComponent(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}`);
+        const antUrl = `https://api.scraperant.com/v2/general?url=${targetUrl}&x-api-key=${apiKey}&browser=false`;
+
+        // 4. Using the built-in fetch
+        const response = await fetch(antUrl);
+        
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`ScraperAnt rejected request (${response.status}): ${errorText}`);
+            const errorData = await response.text();
+            return res.status(response.status).json({ 
+                success: false, 
+                error: `ScraperAnt Error ${response.status}: ${errorData}` 
+            });
         }
 
         const d = await response.json();
 
-        // 📊 The Data Map for Postic
+        // 5. Final Data Structure
         const result = {
             id: d?.id_str,
             text: d?.text || "",
             user: {
                 name: d?.user?.name || "User",
                 username: d?.user?.screen_name || "user",
-                avatar: d?.user?.profile_image_url_https?.replace('_normal', '_400x400'),
+                avatar: d?.user?.profile_image_url_https?.replace('_normal', '_400x400') || "",
                 isVerified: !!(d?.user?.verified || d?.user?.is_blue_verified)
             },
             media: d?.mediaDetails?.map(m => ({
@@ -42,22 +58,15 @@ export default async function handler(req, res) {
             stats: {
                 likes: d?.favorite_count || 0,
                 retweets: d?.retweet_count || 0
-            },
-            quote: d?.quoted_tweet ? {
-                text: d.quoted_tweet.text,
-                user: d.quoted_tweet.user?.name
-            } : null
+            }
         };
 
-        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.status(200).json({ success: true, data: result });
 
     } catch (err) {
-        // Detailed log to help us see exactly where it's failing
-        console.error("Postic Internal Error:", err.message);
         return res.status(500).json({ 
             success: false, 
-            error: "Fetch failed: " + err.message 
+            error: "Internal Server Error: " + err.message 
         });
     }
 }
