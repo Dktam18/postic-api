@@ -3,35 +3,23 @@ export default async function handler(req, res) {
     if (!tweetUrl) return res.status(400).json({ error: "Missing URL" });
 
     const tweetId = tweetUrl.match(/\d+($|(?=\?|\/))/)?.[0];
-    if (!tweetId) return res.status(400).json({ error: "Invalid Tweet ID" });
+    if (!tweetId) return res.status(400).json({ error: "Invalid ID" });
 
     try {
-        // 1. Parse the Cookie JSON from your Environment Variables
-        const cookieData = JSON.parse(process.env.X_COOKIE_JSON || "[]");
+        const apiKey = process.env.SCRAPER_API_KEY;
+        const targetUrl = encodeURIComponent(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}`);
         
-        // 2. Convert JSON array to a standard Cookie Header string
-        // Format: "name=value; name2=value2;"
-        const cookieString = cookieData
-            .map(c => `${c.name}=${c.value}`)
-            .join('; ');
+        // 🚀 THE PROXY HANDSHAKE: Routing through a clean IP
+        // Using ScraperAPI format (you can swap for ScraperAnt)
+        const proxyUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${targetUrl}`;
 
-        // 3. Fetch with the "Rest Assured" Identity
-        const response = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Cookie': cookieString, 
-                'Origin': 'https://platform.twitter.com',
-                'Referer': 'https://platform.twitter.com/'
-            }
-        });
-
-        if (!response.ok) throw new Error(`X Error: ${response.status}`);
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) throw new Error(`Proxy Error: ${response.status}`);
 
         const d = await response.json();
-        if (!d || !d.user) throw new Error("Data restricted or empty even with cookies.");
+        if (!d || !d.user) throw new Error("X still blocking. Try rotating the API key.");
 
-        // 4. Detailed Data Mapping
         const result = {
             id: d.id_str,
             text: d.text,
@@ -52,16 +40,22 @@ export default async function handler(req, res) {
                 retweets: d.retweet_count || 0,
                 quotes: d.quote_count || 0,
                 replies: d.conversation_count || 0
-            }
+            },
+            quote: d.quoted_tweet ? {
+                id: d.quoted_tweet.id_str,
+                text: d.quoted_tweet.text,
+                user: {
+                    name: d.quoted_tweet.user?.name,
+                    username: d.quoted_tweet.user?.screen_name,
+                    avatar: d.quoted_tweet.user?.profile_image_url_https?.replace('_normal', '_200x200')
+                }
+            } : null
         };
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         return res.status(200).json({ success: true, data: result });
 
     } catch (err) {
-        return res.status(500).json({ 
-            success: false, 
-            error: "Postic Fetch Error: " + err.message 
-        });
+        return res.status(500).json({ success: false, error: "Postic Proxy Error: " + err.message });
     }
 }
