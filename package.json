@@ -1,12 +1,9 @@
 {
   "name": "postic-api",
   "version": "1.0.0",
-  "description": "Postic HD Frame Fetcher",
-  "main": "api/fetch.js",
+  "type": "module",
+  "packageManager": "npm@10.0.0",
   "dependencies": {
-    "node-fetch": "^2.6.7"
-  },
-  "engines": {
-    "node": "22.x"
+    "https": "^1.0.0"
   }
 }
