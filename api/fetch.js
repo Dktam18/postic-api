@@ -8,26 +8,17 @@ export default function handler(req, res) {
     if (!tweetId) return res.status(400).json({ error: "Invalid ID" });
 
     const apiKey = process.env.SCRAPER_ANT_API_KEY;
-    
-    // 🛡️ THE COOKIE PARSER: Taking the full JSON and making it a String
-    let cookieString = "";
-    try {
-        const cookieData = JSON.parse(process.env.X_COOKIE_JSON || "[]");
-        cookieString = cookieData.map(c => `${c.name}=${c.value}`).join('; ');
-    } catch (e) {
-        console.error("Cookie JSON Parse Error");
-    }
-
     const targetUrl = encodeURIComponent(`https://x.com/i/status/${tweetId}`);
+
+    // 🚀 THE BROWSER FIX: browser=true + wait_for_selector=article
+    // This tells ScrapingAnt: "Actually open Chrome and wait for the tweet to appear"
+    const antUrl = `https://api.scraperant.com/v2/general?url=${targetUrl}&x-api-key=${apiKey}&browser=true&wait_for_selector=article&return_page_source=true`;
 
     const options = {
         "method": "GET",
         "hostname": "api.scrapingant.com",
-        "path": `/v2/general?url=${targetUrl}&x-api-key=${apiKey}&browser=false&return_page_source=true`,
-        "headers": {
-            "useQueryString": true,
-            "ant-cookies": cookieString // This sends EVERYTHING in your JSON
-        }
+        "path": antUrl.replace('https://api.scrapingant.com', ''),
+        "headers": { "useQueryString": true }
     };
 
     const externalReq = http.request(options, function (externalRes) {
@@ -37,22 +28,21 @@ export default function handler(req, res) {
         externalRes.on("end", () => {
             try {
                 const html = Buffer.concat(chunks).toString();
+                
+                // Search for the data in the rendered HTML
                 const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
                 
                 if (!stateMatch) {
-                    throw new Error("X Blocked the request. Check if cookies are still valid.");
+                    throw new Error("X is still hiding data. The browser didn't load in time.");
                 }
 
                 const state = JSON.parse(stateMatch[1]);
+                const users = state.entities?.users?.entities || {};
+                const tweets = state.entities?.tweets?.entities || {};
                 
-                // 🕵️‍♂️ THOROUGH SEARCH: Check multiple places for User and Tweet data
-                const userEntities = state.entities?.users?.entities || {};
-                const tweetEntities = state.entities?.tweets?.entities || {};
-                
-                // Get the first user found in the entities
-                const userId = Object.keys(userEntities)[0];
-                const u = userEntities[userId];
-                const t = tweetEntities[tweetId];
+                const userId = Object.keys(users)[0];
+                const u = users[userId];
+                const t = tweets[tweetId];
 
                 const result = {
                     success: true,
@@ -63,19 +53,15 @@ export default function handler(req, res) {
                             name: u?.name || "User",
                             username: u?.screen_name || "user",
                             avatar: u?.profile_image_url_https?.replace('_normal', '_400x400'),
-                            isVerified: !!(u?.verified || u?.is_blue_verified),
-                            verifiedType: u?.verified_type || (u?.is_blue_verified ? "Blue" : null)
+                            isVerified: !!(u?.verified || u?.is_blue_verified)
                         },
                         media: t?.extended_entities?.media?.map(m => ({
                             url: m.media_url_https,
-                            type: m.type,
-                            video_url: m.video_info?.variants?.find(v => v.content_type === 'video/mp4')?.url
+                            type: m.type
                         })) || [],
                         stats: {
                             likes: t?.favorite_count || 0,
-                            retweets: t?.retweet_count || 0,
-                            replies: t?.reply_count || 0,
-                            quotes: t?.quote_count || 0
+                            retweets: t?.retweet_count || 0
                         }
                     }
                 };
@@ -84,7 +70,7 @@ export default function handler(req, res) {
                 return res.status(200).json(result);
 
             } catch (err) {
-                return res.status(500).json({ success: false, error: err.message });
+                return res.status(500).json({ success: false, error: "Extraction Failed: " + err.message });
             }
         });
     });
